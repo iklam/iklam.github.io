@@ -1,0 +1,173 @@
+---
+layout: post
+title:  "Lambda Notes 1 - Getting Started"
+date:   2017-12-14 17:58:14 -0800
+categories: jekyll update
+---
+
+<font color="red">This page is still under construction ...</font>
+
+# Motivation
+
+Here are my notes on what I learned about the implementation of
+[InvokeDynamic (JSR 292)](https://docs.oracle.com/javase/8/docs/technotes/guides/vm/multiple-language-support.html)
+and [Lambda](https://docs.oracle.com/javase/tutorial/java/javaOO/lambdaexpressions.html) in JDK 10, from the point of
+view of a [HotSpot JVM](https://en.wikipedia.org/wiki/HotSpot) engineer.
+
+These notes assume that you already have a fairly good understanding of the JVM specification before InvokeDynamic was introduced in JDK 7:
+
+* Before JDK 7, the life of a JVM engineer wasn't too complicated. Yes,
+  the JIT, GC and Verifier were not for the faint of heart, but in most cases you can treat them
+  as black boxes. By reading the bytecode specification, you can pretty much explain to yourself
+  how Java programs are executed.
+
+* However, after the `invokedynamic` bytecode was
+  [introduced in JDK 7](https://www.javaworld.com/article/2860079/learn-java/invokedynamic-101.html), and Lambda expressions were [introduced in
+  JDK 8](https://blogs.oracle.com/thejavatutorials/jdk-8-is-released), it appears that only the priviledged and gifted can follow an
+  exceprt of Java disassembly and tell you what makes it work, much less how to make it work better.
+
+So here it is -- a record of my journey to figure out how an Lambda expression is stored and executed by
+the HotSpot JVM, so that I can implement a caching mechainsm to remove the initialization overhead of
+using Lambda expressions.
+
+I hope these notes would be useful for other engineers who are trying to understand or
+improve the related areas in the JVM.
+
+# Links
+
+Here are some good points to get started. Click on each link below. Some of them point to a
+specific part of the document, such as the
+[invokedynamic bytecode specification](http://docs.oracle.com/javase/specs/jvms/se7/html/jvms-6.html#jvms-6.5.invokedynamic) in
+[The Java® Virtual Machine Specification (SE 7 Edition)](https://docs.oracle.com/javase/specs/jvms/se7/html/index.html),
+[Chapter 6](https://docs.oracle.com/javase/specs/jvms/se7/html/jvms-6.html).
+
+
+* [java.lang.invoke package](http://docs.oracle.com/javase/7/docs/api/java/lang/invoke/package-summary.html)
+  ([MethodHandle](http://docs.oracle.com/javase/7/docs/api/java/lang/invoke/MethodHandle.html),
+   [MethodType](http://docs.oracle.com/javase/7/docs/api/java/lang/invoke/MethodType.html),
+   [CallSite](http://docs.oracle.com/javase/7/docs/api/java/lang/invoke/CallSite.html), etc)
+* Java Virtual Machine Spec
+  - Chapter 4 - [The class File Format](http://docs.oracle.com/javase/specs/jvms/se7/html/jvms-4.html#jvms-4.7.21)
+  - Chapter 5 - [Loading, Linking, and Initializing](http://docs.oracle.com/javase/specs/jvms/se7/html/jvms-5.html#jvms-5.4.3.5)
+  - Chapter 6 - [The Java Virtual Machine Instruction Set](http://docs.oracle.com/javase/specs/jvms/se7/html/jvms-6.html#jvms-6.5.invokedynamic)
+* JEP 109: [Enhance Core Libraries with Lambda](http://openjdk.java.net/jeps/109) (JSR 335)
+* JEP 126: [Lambda expressions and virtual extension methods](http://openjdk.java.net/jeps/126) (JSR 335)
+* JEP 160: [Lambda-Form Representation for Method Handles](http://openjdk.java.net/jeps/160)
+
+# Setup and Tools
+
+<b>JDK 10</b>
+
+In these pages, I assume that you're running on 64-bit Linux and have already build the JDK yourself. All examples below are using JDK 10 ([http://hg.openjdk.java.net/jdk/jdk10/](http://hg.openjdk.java.net/jdk/jdk10/))
+
+<b>asmtools</b>
+
+asmtools has a better Java disassembler than javap. You can download it from [here](https://adopt-openjdk.ci.cloudbees.com/view/OpenJDK/job/asmtools/). E.g., 
+[asmtools-6.0.tar.gz](https://adopt-openjdk.ci.cloudbees.com/view/OpenJDK/job/asmtools/lastSuccessfulBuild/artifact/asmtools-6.0.tar.gz).
+
+```
+export ASMTOOLS_JAR=${HOME}/asmtools-6.0/lib/asmtools.jar
+alias jdis='java -jar ${ASMTOOLS_JAR} jdis'
+alias jasm='java -jar ${ASMTOOLS_JAR} jasm'
+alias jdec='java -jar ${ASMTOOLS_JAR} jdec'
+```
+
+# Hello Lambda
+
+Here's a very simple Java [lambda expression](https://docs.oracle.com/javase/tutorial/java/javaOO/lambdaexpressions.html).
+
+```
+$ cat LambHello.java
+public class LambHello {
+    public static void main(String[] args) {
+        new Thread(() -> {
+            System.err.println("Hello from Lambda");
+        }).start();
+    }
+}
+$ javac -g LambHello.java
+$ java -cp . LambHello
+Hello from Lambda
+```
+
+# First Glance of the InvokeDynamic Bytecode
+
+During early JDK 8 development, Lambda expressions were once implemented using inner classes. However,
+in order to reduce the code footprint, the final version of JDK 8 uses invokedynamic.
+You can see an invokedynamic bytecode here:
+
+```asm
+$ javap -c LambHello.class
+public class LambHello {
+  public LambHello();
+  Code:
+   0: aload_0
+   1: invokespecial #1    // java/lang/Object."<init>":()V
+   4: return
+  public static void main(java.lang.String[]);
+  Code:
+   0: new           #2    // java/lang/Thread
+   3: dup
+   4: invokedynamic #3, 0 // InvokeDynamic #0:run:()Ljava/lang/Runnable;
+      ^^^^^ HERE ^^^^^
+   9: invokespecial #4    // java/lang/Thread."<init>":(Ljava/lang/Runnable;)V
+   2: invokevirtual #5    // java/lang/Thread.start:()V
+  15: return
+}
+```
+
+But the above output from javap is actually a simplified form, which doesn't really tell you what's happening. Here's the real thing, dumped using *jdis* (see notes on asmtools above) that has all the details:
+
+(I have tabulated line with the invokedynamic instruction into multiple lines to improve readability.)
+
+```
+$ jdis LambHello.class
+ 
+super public class LambHello
+    version 54:0
+{
+public Method "<init>":"()V"
+    stack 1 locals 1
+{
+    aload_0;
+    invokespecial   Method java/lang/Object."<init>":"()V";
+    return;
+}
+public static Method main:"([Ljava/lang/String;)V"
+    stack 3 locals 1
+{
+    new class java/lang/Thread;
+    dup;
+    invokedynamic InvokeDynamic REF_invokeStatic:\
+        java/lang/invoke/LambdaMetafactory.metafactory:\
+            "(Ljava/lang/invoke/MethodHandles$Lookup;\
+              Ljava/lang/String;Ljava/lang/invoke/MethodType;\
+              Ljava/lang/invoke/MethodType;\
+              Ljava/lang/invoke/MethodHandle;\
+              Ljava/lang/invoke/MethodType;\
+             )Ljava/lang/invoke/CallSite;"\
+          :run:\
+              "()Ljava/lang/Runnable;" \
+              MethodType "()V", \
+              MethodHandle REF_invokeStatic:LambHello.lambda$main$0:"()V", \
+              MethodType "()V";
+ 
+    invokespecial Method java/lang/Thread."<init>":"(Ljava/lang/Runnable;)V";
+    invokevirtual Method java/lang/Thread.start:"()V";
+    return;
+}
+private static synthetic Method lambda$main$0:"()V"
+    stack 2 locals 0
+{
+    getstatic   Field java/lang/System.err:"Ljava/io/PrintStream;";
+    ldc String "Hello from Lambda";
+    invokevirtual   Method java/io/PrintStream.println:"(Ljava/lang/String;)V";
+    return;
+}
+public static final InnerClass Lookup=class
+    java/lang/invoke/MethodHandles$Lookup of class
+        java/lang/invoke/MethodHandles;
+ 
+}
+```
+
