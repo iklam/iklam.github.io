@@ -129,12 +129,17 @@ Hello from Lambda
 
 # First Glance of the InvokeDynamic Bytecode
 
-You might have thought, "it would pretty straight-forward to translate
-the above Lambda expression into a inner class that captures the `-> {
-System.err.println("Hello from Lambda") }` inner block". [This
-document explains why it isn't done that way](http://cr.openjdk.java.net/~briangoetz/lambda/lambda-translation.html).
-Instead, for various reasons, we have a much more
-complex design that relies on `invokedynamic`.
+You might have thought, "Oh, we can
+[translate the above Lambda expression into a inner
+class](https://stackoverflow.com/questions/16827262/how-will-java-lambda-functions-be-compiled)
+that captures the code block `-> { System.err.println("Hello from Lambda") }`".
+And you are correct as that's how
+[Retrolambda](https://github.com/orfjackal/retrolambda) does it.
+
+However, [this document explains why it isn't done that way in JDK
+8](http://cr.openjdk.java.net/~briangoetz/lambda/lambda-translation.html).
+Instead, for various reasons, we have a much more complex design that
+relies on `invokedynamic`.
 
 ```asm
 $ javap -c LambHello.class
