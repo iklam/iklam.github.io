@@ -442,7 +442,8 @@ From the above experiments, we can see that for each `(params...) -> {code...}` 
 + Any captured local variables are pushed onto the stack before the `invokedynamic` is executed. In our example,
   the `aload_1` bytecode pushes the captured variable, `a`, onto the stack.
 + The code in the Lambda is compiled into a private method, such as `Lambda4.lambda$main$1`
-+ The first time the `invokedynamic` bytecode is executed, a class is dynamically generated. This class implements
++ The first time the `invokedynamic` bytecode is executed, a class is dynamically
+  generated (see more below). This class implements
   the specified interface.  
 + When the `invokedynamic` bytecode finishes execution, it returns an instance of this generated class.
   + For non-capturing Lambdas, always the same instance is returned.
@@ -479,6 +480,83 @@ b = new Dummy;
 b.tmp = a;
 b.run();
 ```
+
+# Dynamically Generated Classes
+
+The following example shows how the class `LambHello5$$Lambda$1` (which is was by the `LambdaMetafactory`) connects the `t.run()`
+call to the `LambHello5.lambda$main$0` method:
+
+```
+public class LambHello5 {
+    public static void main(String[] args) {
+      doit(() -> {
+          Thread.dumpStack();
+        });
+    }
+    static void doit(Runnable t) {
+        t.run();
+    }
+}
+
+$java -cp . -XX:+UnlockDiagnosticVMOptions -XX:+ShowHiddenFrames LambHello5
+java.lang.Exception: Stack trace
+	at java.base/java.lang.Thread.dumpStack(Thread.java:1435)
+	at LambHello5.lambda$main$0(LambHello5.java:4)
+	at LambHello5$$Lambda$1/874088044.run(<Unknown>:1000000)
+	at LambHello5.doit(LambHello5.java:8)
+	at LambHello5.main(LambHello5.java:3)
+```
+
+You can tell the JVM to save the dynamically generated classes by using the
+[`-Djdk.internal.lambda.dumpProxyClasses`](http://hg.openjdk.java.net/jdk/hs/file/f43576cfb273/src/java.base/share/classes/java/lang/invoke/InnerClassLambdaMetafactory.java#l90)
+command-option switch:
+
+```
+$ mkdir -p DUMP_CLASS_FILES
+
+$ java -Djdk.internal.lambda.dumpProxyClasses=DUMP_CLASS_FILES \
+    -XX:+UnlockDiagnosticVMOptions -XX:+ShowHiddenFrames \
+    -cp ~/tmp LambHello5
+java.lang.Exception: Stack trace
+	at java.base/java.lang.Thread.dumpStack(Thread.java:1435)
+	at LambHello5.lambda$main$0(LambHello5.java:4)
+	at LambHello5$$Lambda$1/33524623.run(<Unknown>:1000000)
+	at LambHello5.doit(LambHello5.java:8)
+	at LambHello5.main(LambHello5.java:3)
+
+$ find DUMP_CLASS_FILES/ -type f
+DUMP_CLASS_FILES/LambHello5$$Lambda$1.class
+
+$ jdis 'DUMP_CLASS_FILES/LambHello5$$Lambda$1.class'
+
+super final synthetic class LambHello5$$Lambda$1
+    implements java/lang/Runnable
+    version 52:0
+{
+  private Method "<init>":"()V"
+      stack 1 locals 1
+  {
+      aload_0;
+      invokespecial    Method java/lang/Object."<init>":"()V";
+      return;
+  }
+
+  @+java/lang/invoke/LambdaForm$Hidden { }
+  public Method run:"()V"
+      stack 0 locals 1
+  {
+      invokestatic    Method LambHello5.lambda$main$0:"()V";
+      return;
+  }
+} // end Class LambHello5$$Lambda$1
+```
+
+Note that in the stack trace the generated class is printed as
+`LambHello5$$Lambda$1/` followed by an integer. This indicates that
+the class is a [JVM anonymous
+class](https://blogs.oracle.com/jrose/anonymous-classes-in-the-vm). See
+[this code in
+instanceKlass.cpp](http://hg.openjdk.java.net/jdk/hs/file/f43576cfb273/src/hotspot/share/oops/instanceKlass.cpp#l2278).
 
 
 # Summary
