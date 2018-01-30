@@ -7,9 +7,12 @@ categories: jekyll update
 
 # Hello MethodHandle
 
-To understand what's happening with the extra-long parameter to invokedynamic from
+To understand what's happening with the extra-long parameter to `invokedynamic` from
 [my last post]({% post_url 2017-12-14-lambda-notes-001 %}), let's take a detour in
 [MethodHandle](https://docs.oracle.com/javase/8/docs/api/java/lang/invoke/MethodHandle.html).
+
+(The main reason that I talk about MethodHandle here is to explain
+the strange call stacks we will see when diving into Lambdas.)
 
 ```
 $ cat HelloMH.java
@@ -83,10 +86,51 @@ java.lang.Exception: Stack trace
 	at HelloMH.main(HelloMH.java:8)
 ```
 
-So MethodHandle looks very much like the [Java Reflection API](https://docs.oracle.com/javase/8/docs/api/java/lang/reflect/package-summary.html), until you look at the stack trace –
-even though the bytecode is `invokevirtual MethodHandle.invokeExact(...)`, the call frame for
-`invokeExact` is missing in the call stack, and is somehow replaced by a call to a dynamically
+# Compilation of MethodHandle.invokeExact by javac
+
+[`MethodHandle.invokeExact`](https://docs.oracle.com/javase/9/docs/api/java/lang/invoke/MethodHandle.html#invokeExact-java.lang.Object...-)
+look similar to
+[`Method.invoke`](https://docs.oracle.com/javase/7/docs/api/java/lang/reflect/Method.html#invoke(java.lang.Object,%20java.lang.Object...))
+in the [Java Reflection
+API](https://docs.oracle.com/javase/8/docs/api/java/lang/reflect/package-summary.html). However,
+it's compiled very differently by javac.
+
+Even though the argument type of `MethodHandle.invokeExact` is
+`void (java.lang.Object...)`, the bytecodes emitted by javac looks as
+if you were calling a method with the signature `void
+(java.lang.String)`.  This is explained in the section __Method handle
+compilation__ in the [MethodHandle
+reference](https://docs.oracle.com/javase/9/docs/api/java/lang/invoke/MethodHandle.html). You
+can also see the reference to the [`@PolymorphicSignature`](http://hg.openjdk.java.net/jdk/hs/file/f43576cfb273/src/java.base/share/classes/java/lang/invoke/MethodHandle.java#l436) annotation
+in the [`MethodHandle.invokeExact()`](
+http://hg.openjdk.java.net/jdk/hs/file/f43576cfb273/src/java.base/share/classes/java/lang/invoke/MethodHandle.java#l485) source code:
+
+
+```
+$ javap java.lang.invoke.MethodHandle | grep invokeExact
+  public final native java.lang.Object invokeExact(java.lang.Object...)
+      throws java.lang.Throwable;
+$ javap -private -c HelloMH.class
+...
+   23: aload_3            // local 3 is the <mh> variable
+   24: ldc           #9   // String "yo!"
+   26: invokevirtual #10  // Method java/lang/invoke/MethodHandle.invokeExact:\
+                          //   (Ljava/lang/String;)V
+...
+```
+
+# Execution of the MethodHandle.invokeExact
+
+To see how `MethodHandle.invokeExact` actually calls the target method, let's look at the stack trace.
+Even though the bytecode is `invokevirtual MethodHandle.invokeExact(...)`, the call frame for
+`invokeExact` is missing in the call stack, and is magically replaced by a call to a dynamically
 generated method `java.lang.invoke.LambdaForm$MH/804611486.invokeExact_MT()`.
+
+So what's the magic here? You can see some
+explanations in this [StackOverflow
+answer](https://stackoverflow.com/questions/13978355/on-signature-polymorphic-methods-in-java-7) and this
+[HotSpot blog page](https://wiki.openjdk.java.net/display/HotSpot/Method+handles+and+invokedynamic).
+
 
 To see the contents of the generated classes, use `-Djava.lang.invoke.MethodHandle.DUMP_CLASS_FILES=true`:
 
@@ -106,7 +150,8 @@ java.lang.Exception: Stack trace
 	at HelloMH.main(HelloMH.java:8)
 ```
 
-Note that for ease of debugging, the names of the `LambdaForm$MH` class has been changed to `LambdaForm$MH000`. You can disassemble it:
+Note that for ease of debugging, when you specify `-Djava.lang.invoke.MethodHandle.DUMP_CLASS_FILES=true`,
+the names of the `LambdaForm$MH` class is changed to `LambdaForm$MH000`. Let's disassemble it:
 
 ```
 $ jdis 'DUMP_CLASS_FILES/java/lang/invoke/LambdaForm$MH000.class'
@@ -154,42 +199,42 @@ static Method dummy:"()V"
 }
 ```
 
+You can see that `invokeExact_MT000_LLL_V` first performs a few checks
+on its parameters, and then calls
+[`MethodHandle.invokeBasic`](http://hg.openjdk.java.net/jdk/hs/file/f43576cfb273/src/java.base/share/classes/java/lang/invoke/MethodHandle.java#l544). Well, `invokeBasic` is another `@PolymorphicSignature` method, and the call is
+magically replaced by `DirectMethodHandle$Holder.invokeStatic`, which
+is also a generated method (see comments
+[here](http://hg.openjdk.java.net/jdk/hs/file/f43576cfb273/src/java.base/share/classes/java/lang/invoke/DirectMethodHandle.java#l805)).
 
-We'll look at LambdaForm a bit later. Let's keep moving on ....
-
-# Compilation of MethodHandle.invokeExact by javac
-
-Also, notice that the Java bytecodes are a little unusual. Even though the argument type of
-`MethodHandle.invokeExact` should be `void (java.lang.Object...)`, the bytecodes emitted by javac
-looks as if you were calling a method with the signature `void (java.lang.String)`.
-This is explained in the section __Method handle compilation__ in the
-[MethodHandle reference](https://docs.oracle.com/javase/9/docs/api/java/lang/invoke/MethodHandle.html). You can also see the reference to the
-[`@PolymorphicSignature` annotation](http://hg.openjdk.java.net/jdk/hs/file/f43576cfb273/src/java.base/share/classes/java/lang/invoke/MethodHandle.java#l436)
-in the [`MethodHandle.invokeExact()` source code](
-http://hg.openjdk.java.net/jdk/hs/file/f43576cfb273/src/java.base/share/classes/java/lang/invoke/MethodHandle.java#l485):
-
+You can see the contents of `DirectMethodHandle$Holder.invokeStatic` by doing this:
 
 ```
-$ javap java.lang.invoke.MethodHandle | grep invokeExact
-  public final native java.lang.Object invokeExact(java.lang.Object...)
-      throws java.lang.Throwable;
-$ javap -private -c HelloMH.class
+$ javap -c 'java.lang.invoke.DirectMethodHandle$Holder'
 ...
-   23: aload_3            // local 3 is the <mh> variable
-   24: ldc           #9   // String "yo!"
-   26: invokevirtual #10  // Method java/lang/invoke/MethodHandle.invokeExact:\
-                          //   (Ljava/lang/String;)V
-...
+  static java.lang.Object invokeStatic(java.lang.Object, java.lang.Object);
+  Code:
+     0: aload_0
+     1: invokestatic  #18    // Method java/lang/invoke/DirectMethodHandle.\
+                     internalMemberName:(Ljava/lang/Object;)Ljava/lang/Object;
+     4: astore_2
+     5: aload_1
+     6: aload_2
+     7: checkcast     #20    // class java/lang/invoke/MemberName
+    10: invokestatic  #288   // Method java/lang/invoke/MethodHandle.\
+                      linkToStatic:(Ljava/lang/Object;\
+                           Ljava/lang/invoke/MemberName;)Ljava/lang/Object;
+    13: areturn
 ```
 
-# Execution of the MethodHandle.invokeExact
+There are many dfferent overloaded variants of
+`DirectMethodHandle$Holder.invokeStatic`, but in our example we are
+calling the one listed above: it takes 2 parameters: the first is a
+DirectMethodHandle, and the second is the string we're trying to pass
+to `callme`.
+
+As you can expect, the call to [`MethodHandle.linkToStatic`](http://hg.openjdk.java.net/jdk/hs/file/f43576cfb273/src/java.base/share/classes/java/lang/invoke/MethodHandle.java#l556) is yet again some magic inside the JVM. Basically, it's a native method that knows the invocation target's [`Method*`](http://hg.openjdk.java.net/jdk/hs/file/f43576cfb273/src/hotspot/share/oops/method.hpp). In our example, `linkToStatic` creates a call frame to execute the `callme` method. Note that `linkToStatic` itself doesn't appear in the stack trace -- it kinds of makes a tail call into `callme`.
 
 
-The `HelloMH` class calls `MethodHandle.invokeExact()`, but the call
-stack magically replaces that with a call to
-`LambdaForm$MH000.invokeExact_MT000_LLL_V()`. You can see some
-explanations in this [StackOverflow
-answer](https://stackoverflow.com/questions/13978355/on-signature-polymorphic-methods-in-java-7).
 
 
 # MethodHandle vs varargs
@@ -312,14 +357,14 @@ $ java -XX:-Inline BenchMH 100000000
 
            LOOPS     ELAPSED   NORMALIZED
 MH:      100000000   2333 ms     2333 ms
-Reflect:   1000000   1023 ms   102300 ms  = 43x slower than MH
+Reflect:   1000000   1023 ms   102300 ms  ... 43x slower than MH
 direct:  100000000    972 ms      972 ms
 
 $ java BenchMH 100000000
 
            LOOPS     ELAPSED   NORMALIZED
 MH:      100000000   1073 ms     1073 ms
-Reflect:   1000000    112 ms    11200 ms  = 10x slower than MH
+Reflect:   1000000    112 ms    11200 ms  ... 10x slower than MH
 direct:  100000000    746 ms      746 ms
 ```
 

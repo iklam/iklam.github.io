@@ -554,9 +554,8 @@ super final synthetic class LambHello5$$Lambda$1
 Note that in the stack trace the generated class is printed as
 `LambHello5$$Lambda$1/` followed by an integer. This indicates that
 the class is a [JVM anonymous
-class](https://blogs.oracle.com/jrose/anonymous-classes-in-the-vm). See
-[this code in
-instanceKlass.cpp](http://hg.openjdk.java.net/jdk/hs/file/f43576cfb273/src/hotspot/share/oops/instanceKlass.cpp#l2278).
+class](https://blogs.oracle.com/jrose/anonymous-classes-in-the-vm) (Not to be confused by [Anonymous Inner Class](https://www.geeksforgeeks.org/anonymous-inner-class-java/) at the Java language level :-( ). E.g., see [this code in
+instanceKlass.cpp](http://hg.openjdk.java.net/jdk/hs/file/f43576cfb273/src/hotspot/share/oops/instanceKlass.cpp#l2278) that prints out this special form of class name.
 
 
 # Summary
