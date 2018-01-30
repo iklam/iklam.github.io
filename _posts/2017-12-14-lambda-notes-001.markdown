@@ -455,7 +455,7 @@ So why do we need different instances for capturing Lambdas?
 In the `LambHello4.java` example, the code inside the Lambda expressions aren't actually executed -- we
 just created `a` and `b`, but we have not executed `a.run()` or `b.run()`.
 
-We can say that the `invokedynamic` bytecode __does not__ execute the
+We can see that the `invokedynamic` bytecode __does not__ execute the
 code in the Lambda expression. Rather, it just __prepares the code to
 be executed in the future__. In particular, the captured variable `a`
 for the second Lambda is stored as a private field inside `b`. For example, a
