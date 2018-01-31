@@ -16,7 +16,7 @@ post_url 2017-12-14-lambda-notes-001 %}).
 
 
 (HelloInvoker.jasm in the listing below has manual line breaks so it can't be compiled by `jasm`. Here's 
-[a compilable HelloInvoker.jasm]({{ site.url }}/examples/HelloInvoker.jasm.txt))
+[a compilable HelloInvoker.jasm]({{ site.url }}/examples/HelloInvoker.jasm.txt)).
 
 ```
 // HelloInvoker.jasm
@@ -87,7 +87,7 @@ In our example, the bootstrap method is specified here:
           )Ljava/lang/invoke/CallSite;"
 ```
 
-You can see that its name and parameter types corresponds to the method
+You can see that its name and parameter types corresponds to the method:
 
 ```
 CallSite HelloInvoke.myBSM(
@@ -97,15 +97,18 @@ CallSite HelloInvoke.myBSM(
 ```
 
 
-The first 3 parameters of the bootstrap method must be exactly as showned above. When the bootstrap method is called:
+The first 3 parameters of the bootstrap method must be exactly as showned above.
+It's possible to pass additional parameters to the bootstrap method, as we will see later when looking at Lambda functions.
+
+When the bootstrap method is called:
 
   * the `caller` parameter is provided by the JVM
   * the `name` parameter is specified in the constant pool entry. It indicates the method you want to invoke. (In our example, it's the name `callme`)
   * the `type` parameter is also specified in the constant pool entry. It indicates the parameter- and return types of the method that you want to invoke. In our case, it's `"(Ljava/lang/String;)V"`
 
-(It's possible to pass additional parameters to the bootstrap method, as we will see later when looking at Lambda functions.)
 
-The bootstrap method must return an object of
+
+The bootstrap method must return an object of the
 [`CallSite`](https://docs.oracle.com/javase/9/docs/api/java/lang/invoke/CallSite.html)
 type. In our example, we use the `name` and `type` to look up the
 `HelloInvoke.callme` method, and wrap that inside a
@@ -113,7 +116,7 @@ type. In our example, we use the `name` and `type` to look up the
 
 # Invocation of the Bootstrap Method
 
-Let's modify our test case a little
+Let's modify our test case a little:
 
 ```
 import java.lang.invoke.*;
@@ -171,7 +174,7 @@ As expected, the bootstrap method is executed only once, even when the
 executed twice.
 
 The call to `HelloInvoke.myBSM` is initiated here in the C code, in
-[systemDictionary.cpp](http://hg.openjdk.java.net/jdk/hs/file/ea0d0781c63c/src/hotspot/share/classfile/systemDictionary.cpp#l2833)
+[systemDictionary.cpp](http://hg.openjdk.java.net/jdk/hs/file/ea0d0781c63c/src/hotspot/share/classfile/systemDictionary.cpp#l2833):
 
 ```
   JavaCallArguments args;
@@ -196,7 +199,7 @@ and the C callstack looks like this. This happens when the `invokedynamic` bytec
 <pre>
 (gdb) where
 #0  <a href="http://hg.openjdk.java.net/jdk/hs/file/ea0d0781c63c/src/hotspot/share/classfile/systemDictionary.cpp#l2833">SystemDictionary::find_dynamic_call_site_invoker ()</a>
-    at classfile/systemDictionary.cpp:2834</a>
+    at classfile/systemDictionary.cpp:2834
 #1  in <a href="http://hg.openjdk.java.net/jdk/hs/file/ea0d0781c63c/src/hotspot/share/interpreter/linkResolver.cpp#l1776">LinkResolver::resolve_dynamic_call ()</a>
     at interpreter/linkResolver.cpp:1782
 #2  in <a href="http://hg.openjdk.java.net/jdk/hs/file/ea0d0781c63c/src/hotspot/share/interpreter/linkResolver.cpp#l1740">LinkResolver::resolve_invokedynamic ()</a>
@@ -248,7 +251,7 @@ This method returns two pieces of information back to the C code:
   * an `appendix` in `appendixResult[0]`, which contains the information of the resolved `CallSite` returned by `myBSM`.
   * a [`MemberName`](http://hg.openjdk.java.net/jdk/hs/file/ea0d0781c63c/src/java.base/share/classes/java/lang/invoke/MemberName.java). In our example, this is returned by <a
 href="http://hg.openjdk.java.net/jdk/hs/file/ea0d0781c63c/src/java.base/share/classes/java/lang/invoke/Invokers.java#l520">Invokers.linkToTargetMethod</a>
-which generates a LambdaForm according to the type of the method we're trying to invoke.
+which generates a LambdaForm according to the type of the method we're trying to invoke:
 
 ```
 static MemberName linkToTargetMethod(MethodType mtype) {
@@ -265,8 +268,7 @@ into the ConstantPoolCache of this entry.
 
 This resolution process is rather complicated, but the end result is pretty easy to see.
 You can set a breakpoint in the following code in [`ConstantPoolCacheEntry::set_method_handle_common`](http://hg.openjdk.java.net/jdk/hs/file/ea0d0781c63c/src/hotspot/share/oops/cpCache.cpp#l360)
-and set the variable `TraceInvokeDynamic` to `1`.
-
+and set the variable `TraceInvokeDynamic` to `1`:
 
 ```
 if (TraceInvokeDynamic) {
@@ -336,14 +338,14 @@ In our example, our adapter `LambdaForm$MH.linkToTargetMethod` takes in 2 object
 * The first parameter `p1` is the String `"yippee!"`.
 * The second parameter `p2` is a `DirectMethodHandle` that points to `HelloInvoke.callme`
 
-It essentially does the following
+It essentially does the following:
 
 ```
 ((MethodHandle)p2)->invokeBasic(p1);
 ```
 
 As discussed in [my last post on MethodHandle invocation]({% post_url 2017-12-19-lambda-notes-002-method-handle %}), this
-will magically result in a call to `HelloInvoke.callme` with the following call stack.
+will magically result in a call to `HelloInvoke.callme` with the following call stack:
 
 ```
 Hello invokedynamic: yippee!
