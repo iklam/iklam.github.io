@@ -47,17 +47,11 @@ public class HelloInvoke {
         HelloInvoker.doit();
     }
  
-    static CallSite myBSM(MethodHandles.Lookup caller,
+    static CallSite myBSM(MethodHandles.Lookup lookup,
            String name, MethodType type) throws Throwable {
-        try {
-            MethodHandles.Lookup lookup = MethodHandles.lookup();
-            MethodType mt = MethodType.methodType(void.class, String.class);
-            MethodHandle mh = lookup.findStatic(HelloInvoke.class, name, mt);
-            return new ConstantCallSite(mh.asType(type));
-        } catch (Throwable t) {
-            t.printStackTrace();
-            throw t;
-        }
+        MethodType mt = MethodType.methodType(void.class, String.class);
+        MethodHandle mh = lookup.findStatic(HelloInvoke.class, name, mt);
+        return new ConstantCallSite(mh.asType(type));
     }
  
     static void callme(String x) {
@@ -130,18 +124,12 @@ public class HelloInvoke {
         HelloInvoker.doit();
     }
  
-    static CallSite myBSM(MethodHandles.Lookup caller,
+    static CallSite myBSM(MethodHandles.Lookup lookup,
            String name, MethodType type) throws Throwable {
-        try {
-            Thread.dumpStack();
-            MethodHandles.Lookup lookup = MethodHandles.lookup();
-            MethodType mt = MethodType.methodType(void.class, String.class);
-            MethodHandle mh = lookup.findStatic(HelloInvoke.class, name, mt);
-            return new ConstantCallSite(mh.asType(type));
-        } catch (Throwable t) {
-            t.printStackTrace();
-            throw t;
-        }
+        Thread.dumpStack();
+        MethodType mt = MethodType.methodType(void.class, String.class);
+        MethodHandle mh = lookup.findStatic(HelloInvoke.class, name, mt);
+        return new ConstantCallSite(mh.asType(type));
     }
  
     static void callme(String x) {
