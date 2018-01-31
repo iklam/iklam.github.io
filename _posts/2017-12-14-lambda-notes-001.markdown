@@ -177,8 +177,7 @@ But the above output from `javap` is a simplified form, which doesn't
 really tell you what's happening. Here's the real thing, dumped using
 `jdis` (see notes on asmtools above) that has all the details:
 
-(I have tabulated line with the `invokedynamic` instruction into multiple
-lines to improve readability.)
+(I have broken up long lines improve readability.)
 
 ```
 $ jdis LambHello.class
@@ -209,7 +208,7 @@ public static Method main:"([Ljava/lang/String;)V"
       :run:\
           "()Ljava/lang/Runnable;" \
           MethodType "()V", \
-          MethodHandle REF_invokeStatic:LambHello.lambda$main$0:"()V",
+          MethodHandle REF_invokeStatic:LambHello.lambda$main$0:"()V", \
           MethodType "()V";
   invokestatic  Method doit:"(Ljava/lang/Runnable;)V";
   return;  
@@ -554,7 +553,7 @@ super final synthetic class LambHello5$$Lambda$1
 Note that in the stack trace the generated class is printed as
 `LambHello5$$Lambda$1/` followed by an integer. This indicates that
 the class is a [JVM anonymous
-class](https://blogs.oracle.com/jrose/anonymous-classes-in-the-vm) (Not to be confused by [Anonymous Inner Class](https://www.geeksforgeeks.org/anonymous-inner-class-java/) at the Java language level :-( ). E.g., see [this code in
+class](https://blogs.oracle.com/jrose/anonymous-classes-in-the-vm) (not to be confused by [Anonymous Inner Class](https://www.geeksforgeeks.org/anonymous-inner-class-java/) at the Java language level :-( ). E.g., see [this code in
 instanceKlass.cpp](http://hg.openjdk.java.net/jdk/hs/file/f43576cfb273/src/hotspot/share/oops/instanceKlass.cpp#l2278) that prints out this special form of class name.
 
 

@@ -103,7 +103,7 @@ compilation__ in the [MethodHandle
 reference](https://docs.oracle.com/javase/9/docs/api/java/lang/invoke/MethodHandle.html). You
 can also see the reference to the [`@PolymorphicSignature`](http://hg.openjdk.java.net/jdk/hs/file/f43576cfb273/src/java.base/share/classes/java/lang/invoke/MethodHandle.java#l436) annotation
 in the [`MethodHandle.invokeExact()`](
-http://hg.openjdk.java.net/jdk/hs/file/f43576cfb273/src/java.base/share/classes/java/lang/invoke/MethodHandle.java#l485) source code:
+http://hg.openjdk.java.net/jdk/hs/file/f43576cfb273/src/java.base/share/classes/java/lang/invoke/MethodHandle.java#l485) source code.
 
 
 ```
@@ -132,7 +132,10 @@ answer](https://stackoverflow.com/questions/13978355/on-signature-polymorphic-me
 [HotSpot blog page](https://wiki.openjdk.java.net/display/HotSpot/Method+handles+and+invokedynamic).
 
 
-To see the contents of the generated classes, use `-Djava.lang.invoke.MethodHandle.DUMP_CLASS_FILES=true`:
+To see the contents of the generated classes, use
+`-Djava.lang.invoke.MethodHandle.DUMP_CLASS_FILES=true`. (Note that
+for ease of debugging, when this flag is specified, the names of the
+`LambdaForm$MH` class is changed to `LambdaForm$MH000`)
 
 ```
 $ java -Djava.lang.invoke.MethodHandle.DUMP_CLASS_FILES=true \
@@ -148,19 +151,13 @@ java.lang.Exception: Stack trace
 	at java.base/java.lang.invoke.LambdaForm$MH000/2008017533
                .invokeExact_MT000_LLL_V(LambdaForm$MH000:1000019)
 	at HelloMH.main(HelloMH.java:8)
-```
 
-Note that for ease of debugging, when you specify `-Djava.lang.invoke.MethodHandle.DUMP_CLASS_FILES=true`,
-the names of the `LambdaForm$MH` class is changed to `LambdaForm$MH000`. Let's disassemble it:
-
-```
 $ jdis 'DUMP_CLASS_FILES/java/lang/invoke/LambdaForm$MH000.class'
 package  java/lang/invoke;
 
 super final class LambdaForm$MH000
     version 52:0
 {
-
 @+java/lang/invoke/LambdaForm$Hidden { }
 @+java/lang/invoke/LambdaForm$Compiled { }
 @+jdk/internal/vm/annotation/ForceInline { }
@@ -202,8 +199,8 @@ static Method dummy:"()V"
 You can see that `invokeExact_MT000_LLL_V` first performs a few checks
 on its parameters, and then calls
 [`MethodHandle.invokeBasic`](http://hg.openjdk.java.net/jdk/hs/file/f43576cfb273/src/java.base/share/classes/java/lang/invoke/MethodHandle.java#l544). Well, `invokeBasic` is another `@PolymorphicSignature` method, and the call is
-magically replaced by `DirectMethodHandle$Holder.invokeStatic`, which
-is also a generated method (see comments
+again magically replaced by `DirectMethodHandle$Holder.invokeStatic`, which
+is also a generated method (see source code comments
 [here](http://hg.openjdk.java.net/jdk/hs/file/f43576cfb273/src/java.base/share/classes/java/lang/invoke/DirectMethodHandle.java#l805)).
 
 You can see the contents of `DirectMethodHandle$Holder.invokeStatic` by doing this:
@@ -229,7 +226,7 @@ $ javap -c 'java.lang.invoke.DirectMethodHandle$Holder'
 There are many dfferent overloaded variants of
 `DirectMethodHandle$Holder.invokeStatic`, but in our example we are
 calling the one listed above: it takes 2 parameters: the first is a
-DirectMethodHandle, and the second is the string we're trying to pass
+DirectMethodHandle, and the second is the string `"yo!"` we're trying to pass
 to `callme`.
 
 As you can expect, the call to [`MethodHandle.linkToStatic`](http://hg.openjdk.java.net/jdk/hs/file/f43576cfb273/src/java.base/share/classes/java/lang/invoke/MethodHandle.java#l556) is yet again some magic inside the JVM. Basically, it's a native method that knows the invocation target's [`Method*`](http://hg.openjdk.java.net/jdk/hs/file/f43576cfb273/src/hotspot/share/oops/method.hpp). In our example, `linkToStatic` creates a call frame to execute the `callme` method. Note that `linkToStatic` itself doesn't appear in the stack trace -- it kinds of makes a tail call into `callme`.
@@ -239,10 +236,10 @@ As you can expect, the call to [`MethodHandle.linkToStatic`](http://hg.openjdk.j
 
 # MethodHandle vs varargs
 
-Also note that the arguments to `MethodHandle.invokeExact` are NOT passed using the Varargs
-convention (unlike [java.lang.reflect.Method.invoke()](https://docs.oracle.com/javase/7/docs/api/java/lang/reflect/Method.html#invoke(java.lang.Object,%20java.lang.Object...))
-which would create an Object array to collect the arguments, and thus would be slower
-and creating lots of garbage.) Here's an example of varargs for comparison:
+As we saw above, the arguments to `MethodHandle.invokeExact` are __not__ passed using the Varargs
+convention (unlike [java.lang.reflect.Method.invoke](https://docs.oracle.com/javase/7/docs/api/java/lang/reflect/Method.html#invoke(java.lang.Object,%20java.lang.Object...))
+which is Varargs and would create an Object array to collect the arguments, and thus would be slower
+and creat lots of garbage.) Here's an example of varargs for comparison:
 
 
 ```
@@ -371,3 +368,7 @@ direct:  100000000    746 ms      746 ms
 So you can see that, with inlining by the JIT compiler, `MethodHandle`
 is more than 10x faster than reflection, and can almost match the speed
 of a "real" method invocation (1073 ms vs 746 ms).
+
+# Summary
+
+Now you know how a MethodHandle is invoked. In the next blog entry, we'll see how MethodHandles are by the `invokedynamic` bytecode.
