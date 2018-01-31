@@ -311,9 +311,9 @@ The following is printed by `appendix()->print()` (simplified):
 
 ```
 java.lang.invoke.DirectMethodHandle 
-- 'customizationCount' 'B' @12  0
+- 'customizationCount' 'B' = 0
 - 'type' = (Ljava/lang/String;)V
-- 'member' 'Ljava/lang/invoke/MemberName;' @28 =
+- 'member' 'Ljava/lang/invoke/MemberName;' =
     {method} {0x00007fff310d5770} 'callme' '(Ljava/lang/String;)V'
     in 'HelloInvoke'
 ...
@@ -322,21 +322,23 @@ java.lang.invoke.DirectMethodHandle
 In summary, we store the following in a resolved constant pool entry for `invokedynamic`:
 
 * the `adapter` stores the LambdaForm returned by `Invokers.linkToTargetMethod`
-* the `appendix` stores the `CallSite` returned by `myBSM`.
+* the `appendix` stores the call site returned by `myBSM`.
 
 # Execution of the InvokeDynamic Bytecode
 
 When an `invokedynamic` bytecode is executed in the interpreter, it does the following:
 
 * Make sure the the constant pool entry is resolved (see above)
-* Fetch the `adapter` and `appendix`  from the constant pool entry
+* Fetch the `adapter` and `appendix`  from the ConstantPoolCacheEntry
 * If `appendix` is not null, push it to the stack as a trailing parameter
 * Call the `adapter` method
 
 In our example, our adapter `LambdaForm$MH.linkToTargetMethod` takes in 2 object parameters:
 
-* The first parameter `p1` is the String `"yippee!"`.
+* The first parameter `p1` is the String `"yippee!"`
+  * This was pushed by our test program in `HelloInvoker.doit`
 * The second parameter `p2` is a `DirectMethodHandle` that points to `HelloInvoke.callme`
+  * This was pushed by `invokedynamic` as a trailing parameter
 
 It essentially does the following:
 
