@@ -1,0 +1,11 @@
+super public class HelloInvoker
+    version 52:0
+{
+    public static Method doit:"()V"
+    stack 3 locals 1
+    {
+     ldc           String "yippee!";
+     invokedynamic InvokeDynamic REF_invokeStatic:HelloInvoke.bootstrap:"(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/CallSite;":callme:"(Ljava/lang/String;)V";
+     return;
+    }
+}
