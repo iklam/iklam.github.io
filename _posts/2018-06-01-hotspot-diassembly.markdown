@@ -99,7 +99,7 @@ ifeq  153 ifeq  [0x00007f830cc93da0, 0x00007f830cc941c0] 1056 bytes
 [ .... snip .... ]
 mov    (%rsp),%eax
 add    $0x8,%rsp
-test   %eax,%eax           ;; 2353:   __ testl(rax, rax);
+test   %eax,%eax           ;;@FILE: /src/hotspot/cpu/x86/templateTable_x86.cpp
 jne    0x00007f830cc94177  ;; 2354:   __ jcc(j_not(cc), not_taken);
 mov    -0x18(%rbp),%rcx    ;; 2120:   __ get_method(rcx); // rcx holds method
 mov    -0x28(%rbp),%rax    ;; 2121:   __ profile_taken_branch(rax, rbx); // rax holds updated MDP, rbx
