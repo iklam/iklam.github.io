@@ -40,8 +40,6 @@ From the `classload.log` file, we can see that a lot of the classes are loaded b
 | Custom Loaders|  **9969**|
 | Total         |   12811  | 
 
-<br>
-
 The JDK doesn't come with tooling for CDS support for custom loaders, so
 I used Volker Simonis' [cl4cds](https://github.com/simonis/cl4cds)
 to create a class list (*see note below*):
@@ -75,8 +73,6 @@ repo, with and without CDS:
 |-Xshare:off |    5820 |
 |-Xshare:auto|    4753 |
 |Improvement |  **1067**|
-
-<br>
 
 This shows that CDS can provide significant improvement for apps that load a large number
 of classes via custom loaders. However, the current usage model is very difficult.
