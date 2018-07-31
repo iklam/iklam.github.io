@@ -1,0 +1,56 @@
+diff --git a/src/classes/io/simonis/cl4cds.java b/src/classes/io/simonis/cl4cds.java
+index ea3c474..dd9b61a 100644
+--- a/src/classes/io/simonis/cl4cds.java
++++ b/src/classes/io/simonis/cl4cds.java
+@@ -127,7 +127,7 @@ public class cl4cds {
+       String line;
+       long objectID = 0;
+       Set<String> klassSet = new HashSet<>();
+-      Map<String, String> nameSourceMap = new HashMap<>();
++      Set<String> klassNameSet = new HashSet<>();
+       while((line = in.readLine()) != null) {
+         if (firstLine.reset(line).matches()) {
+           MatchResult mr1 = firstLine.toMatchResult();
+@@ -171,11 +171,12 @@ public class cl4cds {
+ 
+             if ("NULL class loader".equals(loader) ||
+                 loader.contains("of <bootloader>") || // this is JDK 11 syntax
++                loader.contains("of 'bootstrap'") || // this is JDK 12 syntax
+                 loader.contains("jdk/internal/loader/ClassLoaders$PlatformClassLoader" /* && source == jrt image */) ||
+                 loader.contains("jdk/internal/loader/ClassLoaders$AppClassLoader" /* && source == jar file */)) {
+               out.println(name.replace('.', '/') + " id: " + klass);
+               klassSet.add(klass);
+-              nameSourceMap.put(name, source);
++              klassNameSet.add(name);
+             }
+             else {
+               // Custom class loader (currently only supported if classes are loaded from jar files ?)
+@@ -216,23 +217,23 @@ public class cl4cds {
+                 }
+                 continue;
+               }
++              if (klassNameSet.contains(name)) {
++                System.err.println("Skipping " + name + " from " + sourceFile + " - reason: already dumped");
++                continue;
++              }
+               List<String> deps = new LinkedList<>();
+               deps.add(parent);
+               if (interf != null) {
+                 deps.addAll(Arrays.asList(interf.split("\\s")));
+               }
+               if (klassSet.containsAll(deps)) {
+-                if (source.equals(nameSourceMap.get(name))) {
+-                  System.err.println("Skipping " + name + " from " + sourceFile + " - reason: already dumped");
+-                  continue;
+-                }
+                 out.print(name.replace('.', '/') + " id: " + klass + " super: " + parent);
+                 if (interf != null) {
+                   out.print(" interfaces: " + interf);
+                 }
+                 out.println(" source: " + sourceFile);
+                 klassSet.add(klass);
+-                nameSourceMap.put(name, source);
++                klassNameSet.add(name);
+               }
+               else {
+                 System.err.println("Skipping " + name + " from " + sourceFile + " - reason: failed dependencies");
