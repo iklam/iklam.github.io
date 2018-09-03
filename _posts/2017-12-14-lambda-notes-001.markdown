@@ -5,6 +5,8 @@ date:   2017-12-14 17:58:14 -0800
 categories: jekyll update
 ---
 
+*(Last updated Sep 2, 2018)*
+
 # Motivation
 
 Here are my notes on what I learned about the implementation of

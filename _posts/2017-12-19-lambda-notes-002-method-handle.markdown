@@ -5,6 +5,8 @@ date:   2017-12-19 07:58:14 -0800
 categories: jekyll update
 ---
 
+*(Last updated Sep 2, 2018)*
+
 # Hello MethodHandle
 
 To understand what's happening with the extra-long parameter to `invokedynamic` from
