@@ -11,8 +11,12 @@ To understand what's happening with the extra-long parameter to `invokedynamic` 
 [my last post]({% post_url 2017-12-14-lambda-notes-001 %}), let's take a detour in
 [MethodHandle](https://docs.oracle.com/javase/10/docs/api/java/lang/invoke/MethodHandle.html).
 
-(The main reason that I talk about MethodHandle here is to explain
-the strange call stacks we will see when diving into Lambdas.)
+The main reasons that I talk about MethodHandles here are:
+* Their implementation is similar to, but not as messy as, Lambdas.
+  So it will be like a practice run before dealing with the real thing.
+* Lambda is implemented using MethodHandles, so let's first understand
+  how the latter works.
+
 
 ```
 $ cat HelloMH.java
@@ -92,7 +96,7 @@ and `LambdaForm$MH` are loaded as [JVM anonymous classes](https://blogs.oracle.c
 # Compilation of MethodHandle.invokeExact by javac
 
 [`MethodHandle.invokeExact`](https://docs.oracle.com/javase/10/docs/api/java/lang/invoke/MethodHandle.html#invokeExact-java.lang.Object...-)
-look similar to
+looks similar to
 [`Method.invoke`](https://docs.oracle.com/javase/7/docs/api/java/lang/reflect/Method.html#invoke(java.lang.Object,%20java.lang.Object...))
 in the [Java Reflection
 API](https://docs.oracle.com/javase/8/docs/api/java/lang/reflect/package-summary.html). However,
@@ -130,11 +134,6 @@ To see how `MethodHandle.invokeExact` actually calls the target method, let's lo
 Even though the bytecode is `invokevirtual MethodHandle.invokeExact(...)`, the call frame for
 `invokeExact` is missing in the call stack, and is magically replaced by a call to a dynamically
 generated method `java.lang.invoke.LambdaForm$MH.invokeExact_MT()`.
-
-So what's the magic here? You can see some
-explanations in this [StackOverflow
-answer](https://stackoverflow.com/questions/13978355/on-signature-polymorphic-methods-in-java-7) and this
-[HotSpot blog page](https://wiki.openjdk.java.net/display/HotSpot/Method+handles+and+invokedynamic).
 
 To see the contents of the generated classes, use
 `-Djava.lang.invoke.MethodHandle.DUMP_CLASS_FILES=true`. (Note that
@@ -225,7 +224,11 @@ static Method invokeStatic000_LF_V:"(Ljava/lang/Object;F)V"
 }
 ```
 
-As you can expect, the call to [`MethodHandle.linkToStatic`](http://hg.openjdk.java.net/jdk/hs/file/f43576cfb273/src/java.base/share/classes/java/lang/invoke/MethodHandle.java#l556) is yet again some magic inside the JVM. Basically, it's a native method that knows the invocation target's [`Method*`](http://hg.openjdk.java.net/jdk/hs/file/f43576cfb273/src/hotspot/share/oops/method.hpp). In our example, `linkToStatic` creates a call frame to execute the `callme` method. Note that `linkToStatic` itself doesn't appear in the stack trace -- it kinds of makes a tail call into `callme`.
+As you can expect, the call to [`MethodHandle.linkToStatic`](http://hg.openjdk.java.net/jdk/hs/file/f43576cfb273/src/java.base/share/classes/java/lang/invoke/MethodHandle.java#l556) is yet again some magic inside the JVM. Basically, it's a native method that knows the invocation target's [`Method*`](http://hg.openjdk.java.net/jdk/hs/file/f43576cfb273/src/hotspot/share/oops/method.hpp). In our example, `linkToStatic` creates a call frame to execute the `callme` method. Note that `linkToStatic` itself doesn't appear in the stack trace -- it kinds of makes a [tail call](https://en.wikipedia.org/wiki/Tail_call) into `callme`.
+
+*References: if you're interested in more details, see this [StackOverflow answer](https://stackoverflow.com/questions/13978355/on-signature-polymorphic-methods-in-java-7) and 
+this [HotSpot blog page](https://wiki.openjdk.java.net/display/HotSpot/Method+handles+and+invokedynamic).*
+
 
 # Shuffling of Parameters
 
@@ -274,19 +277,21 @@ adding before and after the formal parameters:
         at BadMH.main(BadMH.java:12)
     ```
   * The frame of `invokeStatic000_LF_V` contains:
-    * an object before the `F`: this is the `MemberName` that represents the target method
+    * an object before the `F`: this is the `MemberName` that represents the target method (it basically carries a [C++
+      `Method` pointer](http://hg.openjdk.java.net/jdk/hs/file/f43576cfb273/src/hotspot/share/oops/method.hpp#l65) to
+      the target method).
 
 Inside `invokeStatic000_LF_V`, we shuffle the parameters such that the incoming call frame of `MethodHandle.linkToStatic` contains:
 
-  * all the parameters as declared by the target method (one `F` in our example)
+  * all the parameters as declared by the target method (a single `F` in our example)
   * followed by the `MemberName` of the target method.
 
 When the native method `MethodHandle.linkToStatic` is entered, the "front" part of the call
 stack already contains the exact parameters as needed by the target method.
-`linkToStatic` simply retrieves the JVM `Method` pointer from the MemberName, drop this last parameter, and jump to the
-entry of the target method.
+`linkToStatic` simply retrieves the JVM `Method` pointer from the MemberName, drops
+this last parameter, and jumps to the entry of the target method.
 
-(We'll see this in more details in the section *Linking of Polymorphic Methods* below.)
+(We'll see this in more details in the *Linking Polymorphic Methods* sections below.)
 
 
 # MethodHandle vs varargs
@@ -424,7 +429,7 @@ So you can see that, with inlining by the JIT compiler, `MethodHandle`
 is more than 10x faster than reflection, and can almost match the speed
 of a "real" method invocation (1073 ms vs 746 ms).
 
-# Linking of Polymorphic Methods in the HotSpot JVM (static invocations)
+# Linking Polymorphic Methods in the HotSpot JVM (static invocations)
 
 Let's look at the easy ones first. A few native polymorphic methods
 (declared with the `@PolymorphicSignature` annotation) in the `MethodHandle` class
@@ -490,7 +495,7 @@ As discussed previously, `linkToStatic` simply pops off the last parameter as a 
 such that the incoming parameters are exactly what the target method wants, and then branch
 to the target method (as a tail call).
 
-# Linking of Polymorphic Methods in the HotSpot JVM (Virtual Invocations)
+# Linking Polymorphic Methods in the HotSpot JVM (Virtual Invocations)
 
 Vitrual invocations (using the `invokevirtual` or `invokespecial` bytecodes)
 of polymorphic methods are much more complicated, and involve lots of Java code.
@@ -512,22 +517,14 @@ When the classfile is loaded by HotSpot, the `invokevirtual` bytecode is rewritt
 ->  (*opc) = (u1)Bytecodes::_invokehandle;
 
 (gdb) where
-#0  <a href="http://hg.openjdk.java.net/jdk/hs/file/7f5fca094057/src/hotspot/share/interpreter/rewriter.cpp#l240">Rewriter::maybe_rewrite_invokehandle ()</a>
-    at interpreter/rewriter.cpp:240
-#1  <a href="http://hg.openjdk.java.net/jdk/hs/file/7f5fca094057/src/hotspot/share/interpreter/rewriter.cpp#l174">Rewriter::rewrite_member_reference ()</a>
-    at interpreter/rewriter.cpp:174
-#2  <a href="http://hg.openjdk.java.net/jdk/hs/file/7f5fca094057/src/hotspot/share/interpreter/rewriter.cpp#l472">Rewriter::scan_method ()</a>
-    at interpreter/rewriter.cpp:472
-#3  <a href="http://hg.openjdk.java.net/jdk/hs/file/7f5fca094057/src/hotspot/share/interpreter/rewriter.cpp#l550">Rewriter::rewrite_bytecodes ()</a>
-    at interpreter/rewriter.cpp:550
-#4  <a href="http://hg.openjdk.java.net/jdk/hs/file/7f5fca094057/src/hotspot/share/interpreter/rewriter.cpp#l590">Rewriter::Rewriter ()</a>
-    at interpreter/rewriter.cpp:590
-#5  <a href="http://hg.openjdk.java.net/jdk/hs/file/7f5fca094057/src/hotspot/share/interpreter/rewriter.cpp#l572">Rewriter::rewrite ()</a>
-    at interpreter/rewriter.cpp:572
-#6  <a href="http://hg.openjdk.java.net/jdk/hs/file/7f5fca094057/src/hotspot/share/oops/instanceKlass.cpp#l655">InstanceKlass::rewrite_class ()</a>
-    at oops/instanceKlass.cpp:655
-#7  <a href="http://hg.openjdk.java.net/jdk/hs/file/7f5fca094057/src/hotspot/share/oops/instanceKlass.cpp#l605">InstanceKlass::link_class_impl ()</a>
-    at oops/instanceKlass.cpp:605
+#0 <a href="http://hg.openjdk.java.net/jdk/hs/file/7f5fca094057/src/hotspot/share/interpreter/rewriter.cpp#l240">Rewriter::maybe_rewrite_invokehandle()</a>    @ rewriter.cpp:240
+#1 <a href="http://hg.openjdk.java.net/jdk/hs/file/7f5fca094057/src/hotspot/share/interpreter/rewriter.cpp#l174">Rewriter::rewrite_member_reference()</a>      @ rewriter.cpp:174
+#2 <a href="http://hg.openjdk.java.net/jdk/hs/file/7f5fca094057/src/hotspot/share/interpreter/rewriter.cpp#l472">Rewriter::scan_method()</a>                   @ rewriter.cpp:472
+#3 <a href="http://hg.openjdk.java.net/jdk/hs/file/7f5fca094057/src/hotspot/share/interpreter/rewriter.cpp#l550">Rewriter::rewrite_bytecodes()</a>             @ rewriter.cpp:550
+#4 <a href="http://hg.openjdk.java.net/jdk/hs/file/7f5fca094057/src/hotspot/share/interpreter/rewriter.cpp#l590">Rewriter::Rewriter()</a>                      @ rewriter.cpp:590
+#5 <a href="http://hg.openjdk.java.net/jdk/hs/file/7f5fca094057/src/hotspot/share/interpreter/rewriter.cpp#l572">Rewriter::rewrite()</a>                       @ rewriter.cpp:572
+#6 <a href="http://hg.openjdk.java.net/jdk/hs/file/7f5fca094057/src/hotspot/share/oops/instanceKlass.cpp#l655">InstanceKlass::rewrite_class()</a>            @ instanceKlass.cpp:655
+#7 <a href="http://hg.openjdk.java.net/jdk/hs/file/7f5fca094057/src/hotspot/share/oops/instanceKlass.cpp#l605">InstanceKlass::link_class_impl()</a>          @ instanceKlass.cpp:605
 ...
 </pre>
 
@@ -553,20 +550,13 @@ calling back into Java.
                            &args, CHECK_(empty));
 
 (gdb) where
-#0  <a href="http://hg.openjdk.java.net/jdk/hs/file/7f5fca094057/src/hotspot/share/classfile/systemDictionary.cpp#l2556">SystemDictionary::find_method_handle_invoker ()</a>
-    at classfile/systemDictionary.cpp:2556
-#1  <a href="http://hg.openjdk.java.net/jdk/hs/file/7f5fca094057/src/hotspot/share/interpreter/linkResolver.cpp#l519">LinkResolver::lookup_polymorphic_method ()</a>
-    at interpreter/linkResolver.cpp:519
-#2  <a href="http://hg.openjdk.java.net/jdk/hs/file/7f5fca094057/src/hotspot/share/interpreter/linkResolver.cpp#l1661">LinkResolver::resolve_handle_call ()</a>
-    at interpreter/linkResolver.cpp:1661
-#3  <a href="http://hg.openjdk.java.net/jdk/hs/file/7f5fca094057/src/hotspot/share/interpreter/linkResolver.cpp#l1647">LinkResolver::resolve_invokehandle ()</a>
-    at interpreter/linkResolver.cpp:1647
-#4  <a href="http://hg.openjdk.java.net/jdk/hs/file/7f5fca094057/src/hotspot/share/interpreter/linkResolver.cpp#l1573">LinkResolver::resolve_invoke ()</a>
-    at interpreter/linkResolver.cpp:1573
-#5  <a href="http://hg.openjdk.java.net/jdk/hs/file/7f5fca094057/src/hotspot/share/interpreter/interpreterRuntime.cpp#l968">InterpreterRuntime::resolve_invokehandle ()</a>
-    at interpreter/interpreterRuntime.cpp:968
-#6  <a href="http://hg.openjdk.java.net/jdk/hs/file/7f5fca094057/src/hotspot/share/interpreter/interpreterRuntime.cpp#l1016">InterpreterRuntime::resolve_from_cache ()</a>
-    at interpreter/interpreterRuntime.cpp:1016
+#0 <a href="http://hg.openjdk.java.net/jdk/hs/file/7f5fca094057/src/hotspot/share/classfile/systemDictionary.cpp#l2556">SystemDictionary::find_method_handle_invoker()</a> @ systemDictionary.cpp:2556
+#1 <a href="http://hg.openjdk.java.net/jdk/hs/file/7f5fca094057/src/hotspot/share/interpreter/linkResolver.cpp#l519">LinkResolver::lookup_polymorphic_method()</a>      @ linkResolver.cpp:519
+#2 <a href="http://hg.openjdk.java.net/jdk/hs/file/7f5fca094057/src/hotspot/share/interpreter/linkResolver.cpp#l1661">LinkResolver::resolve_handle_call()</a>            @ linkResolver.cpp:1661
+#3 <a href="http://hg.openjdk.java.net/jdk/hs/file/7f5fca094057/src/hotspot/share/interpreter/linkResolver.cpp#l1647">LinkResolver::resolve_invokehandle()</a>           @ linkResolver.cpp:1647
+#4 <a href="http://hg.openjdk.java.net/jdk/hs/file/7f5fca094057/src/hotspot/share/interpreter/linkResolver.cpp#l1573">LinkResolver::resolve_invoke()</a>                 @ linkResolver.cpp:1573
+#5 <a href="http://hg.openjdk.java.net/jdk/hs/file/7f5fca094057/src/hotspot/share/interpreter/interpreterRuntime.cpp#l968">InterpreterRuntime::resolve_invokehandle()</a>     @ interpreterRuntime.cpp:968
+#6 <a href="http://hg.openjdk.java.net/jdk/hs/file/7f5fca094057/src/hotspot/share/interpreter/interpreterRuntime.cpp#l1016">InterpreterRuntime::resolve_from_cache()</a>       @ interpreterRuntime.cpp:1016
 </pre>
 
 When the `MethodHandleNatives.linkMethod` call completes, a [`MemberName`](http://hg.openjdk.java.net/jdk/hs/file/7f5fca094057/src/java.base/share/classes/java/lang/invoke/MemberName.java) is returned ([see here](http://hg.openjdk.java.net/jdk/hs/file/7f5fca094057/src/hotspot/share/classfile/systemDictionary.cpp#l2557)).
@@ -578,9 +568,9 @@ When the `MethodHandleNatives.linkMethod` call completes, a [`MemberName`](http:
 At this point, the linking of this polymorphic method call is complete. Subsequently, this `invokehandle`
 bytecode can be executed by loading information about the MethodHandle from the corresponding  `ConstantPoolCacheEntry`.
 
-# TODO 1
+# TODO ...
 
-# TODO 2
+I can probably include more details here, but I'll skip them for now ...
 
 <!------
 
