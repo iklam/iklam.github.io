@@ -5,6 +5,8 @@ date:   2017-12-20 07:58:14 -0800
 categories: jekyll update
 ---
 
+*(Last updated Sep 2, 2018)*
+
 # Hello InvokeDynamic
 
 Finally, we're ready to use an `invokedynamic` bytecode.
@@ -103,8 +105,8 @@ It's possible to pass additional parameters to the bootstrap method, as we will 
 When the bootstrap method is called:
 
   * the `caller` parameter is provided by the JVM
-  * the `name` parameter is specified in the constant pool entry. It indicates the method you want to invoke. (In our example, it's the name `callme`)
-  * the `type` parameter is also specified in the constant pool entry. It indicates the parameter- and return types of the method that you want to invoke. In our case, it's `"(Ljava/lang/String;)V"`
+  * the `name` parameter is extracted from the constant pool entry. It indicates the method you want to invoke. (In our example, it's the name `callme`)
+  * the `type` parameter is also extracted from the constant pool entry. It indicates the parameter- and return types of the method that you want to invoke. In our case, it's `"(Ljava/lang/String;)V"`
 
 
 
@@ -144,7 +146,6 @@ public class HelloInvoke {
 $ java -Djava.lang.invoke.MethodHandle.DUMP_CLASS_FILES=true \
        -XX:+UnlockDiagnosticVMOptions -XX:+ShowHiddenFrames -cp . HelloInvoke
 java.lang.Exception: Stack trace
-  at java.lang.Thread.dumpStack(Thread.java:1435)
   at HelloInvoke.myBSM(HelloInvoke.java:12)
   at java.lang.invoke.DirectMethodHandle$Holder.invokeStatic()
   at java.lang.invoke.DelegatingMethodHandle$Holder.reinvoke_L()
@@ -158,7 +159,6 @@ java.lang.Exception: Stack trace
   at HelloInvoke.main(HelloInvoke.java:5)
 Hello invokedynamic: yippee!
 java.lang.Exception: Stack trace
-  at java.lang.Thread.dumpStack(Thread.java:1435)
   at HelloInvoke.callme(HelloInvoke.java:25)
   at java.lang.invoke.DirectMethodHandle$Holder.invokeStatic()
   at java.lang.invoke.LambdaForm$MH001.linkToTargetMethod000_LL_V()
@@ -198,19 +198,13 @@ and the C callstack looks like this. This happens when the `invokedynamic` bytec
 
 <pre>
 (gdb) where
-#0  <a href="http://hg.openjdk.java.net/jdk/hs/file/ea0d0781c63c/src/hotspot/share/classfile/systemDictionary.cpp#l2833">SystemDictionary::find_dynamic_call_site_invoker ()</a>
-    at classfile/systemDictionary.cpp:2834
-#1  in <a href="http://hg.openjdk.java.net/jdk/hs/file/ea0d0781c63c/src/hotspot/share/interpreter/linkResolver.cpp#l1776">LinkResolver::resolve_dynamic_call ()</a>
-    at interpreter/linkResolver.cpp:1782
-#2  in <a href="http://hg.openjdk.java.net/jdk/hs/file/ea0d0781c63c/src/hotspot/share/interpreter/linkResolver.cpp#l1740">LinkResolver::resolve_invokedynamic ()</a>
-    at interpreter/linkResolver.cpp:1741
-#3  in <a href="http://hg.openjdk.java.net/jdk/hs/file/ea0d0781c63c/src/hotspot/share/interpreter/linkResolver.cpp#l1575">LinkResolver::resolve_invoke ()</a>
-    at interpreter/linkResolver.cpp:1575
-#4  in <a href="http://hg.openjdk.java.net/jdk/hs/file/ea0d0781c63c/src/hotspot/share/interpreter/interpreterRuntime.cpp#l868">InterpreterRuntime::resolve_invokedynamic ()</a>
-    at interpreter/interpreterRuntime.cpp:869
-#5  in <a href="http://hg.openjdk.java.net/jdk/hs/file/ea0d0781c63c/src/hotspot/share/interpreter/interpreterRuntime.cpp#l897">InterpreterRuntime::resolve_from_cache ()</a>
-    at interpreter/interpreterRuntime.cpp:897
-#6  in ?? ()
+#0 <a href="http://hg.openjdk.java.net/jdk/hs/file/ea0d0781c63c/src/hotspot/share/classfile/systemDictionary.cpp#l2833">SystemDictionary::find_dynamic_call_site_invoker</a> @ systemDictionary.cpp:2834
+#1 <a href="http://hg.openjdk.java.net/jdk/hs/file/ea0d0781c63c/src/hotspot/share/interpreter/linkResolver.cpp#l1776">LinkResolver::resolve_dynamic_call</a>               @ linkResolver.cpp:1782
+#2 <a href="http://hg.openjdk.java.net/jdk/hs/file/ea0d0781c63c/src/hotspot/share/interpreter/linkResolver.cpp#l1740">LinkResolver::resolve_invokedynamic</a>              @ linkResolver.cpp:1741
+#3 <a href="http://hg.openjdk.java.net/jdk/hs/file/ea0d0781c63c/src/hotspot/share/interpreter/linkResolver.cpp#l1575">LinkResolver::resolve_invoke</a>                     @ linkResolver.cpp:1575
+#4 <a href="http://hg.openjdk.java.net/jdk/hs/file/ea0d0781c63c/src/hotspot/share/interpreter/interpreterRuntime.cpp#l868">InterpreterRuntime::resolve_invokedynamic</a>        @ interpreterRuntime.cpp:869
+#5 <a href="http://hg.openjdk.java.net/jdk/hs/file/ea0d0781c63c/src/hotspot/share/interpreter/interpreterRuntime.cpp#l897">InterpreterRuntime::resolve_from_cache</a>           @ interpreterRuntime.cpp:897
+#6 ?? ()
 </pre>
 
 The `JavaCalls::call_static(...)` in the C code makes a call to the Java method [`MethodHandleNatives.linkCallSite`](http://hg.openjdk.java.net/jdk/hs/file/ea0d0781c63c/src/java.base/share/classes/java/lang/invoke/MethodHandleNatives.java#l230), which calls [`MethodHandleNatives.linkCallSiteImpl`](http://hg.openjdk.java.net/jdk/hs/file/ea0d0781c63c/src/java.base/share/classes/java/lang/invoke/MethodHandleNatives.java#l245),
@@ -249,6 +243,7 @@ if (callSite instanceof ConstantCallSite) {
 This method returns two pieces of information back to the C code:
 
   * an `appendix` in `appendixResult[0]`, which contains the information of the resolved `CallSite` returned by `myBSM`.
+    * The `CallSite` points to the `HelloInvoke.callme method`.
   * a [`MemberName`](http://hg.openjdk.java.net/jdk/hs/file/ea0d0781c63c/src/java.base/share/classes/java/lang/invoke/MemberName.java). In our example, this is returned by <a
 href="http://hg.openjdk.java.net/jdk/hs/file/ea0d0781c63c/src/java.base/share/classes/java/lang/invoke/Invokers.java#l520">Invokers.linkToTargetMethod</a>
 which generates a LambdaForm according to the type of the method we're trying to invoke:
@@ -352,7 +347,6 @@ will magically result in a call to `HelloInvoke.callme` with the following call 
 ```
 Hello invokedynamic: yippee!
 java.lang.Exception: Stack trace
-  at java.lang.Thread.dumpStack(Thread.java:1435)
   at HelloInvoke.callme(HelloInvoke.java:25)
   at java.lang.invoke.DirectMethodHandle$Holder.invokeStatic()
   at java.lang.invoke.LambdaForm$MH001.linkToTargetMethod000_LL_V()
