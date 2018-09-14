@@ -347,56 +347,76 @@ import java.lang.invoke.*;
 import java.lang.reflect.*;
  
 public class BenchMH {
-  volatile static String c;
- 
+  static class Helper {
+    static MethodHandle getHandle() {
+      try {
+        MethodHandles.Lookup lookup = MethodHandles.lookup();
+        MethodType mt = MethodType.methodType(void.class, String.class);
+        return lookup.findStatic(BenchMH.class, "callme", mt);
+      } catch (Throwable t) {
+        t.printStackTrace();
+        return null;
+      }
+    }
+    static Method getMethod() {
+      try {
+        Class[] argTypes = new Class[] { String.class };
+        return BenchMH.class.getDeclaredMethod("callme", argTypes);
+      } catch (Throwable t) {
+        t.printStackTrace();
+        return null;
+      }
+    }
+  }
+
+  static String c;
+  static final MethodHandle mh = Helper.getHandle();
+  static final Method m = Helper.getMethod();
+
   public static void main(String args[]) throws Throwable {
-    int loops = 100 * 1000 * 1000;
+    int loops = 400 * 1000 * 1000;
     try {
       loops = Integer.parseInt(args[0]);
     } catch (Throwable t) {}
  
-    MethodHandles.Lookup lookup = MethodHandles.lookup();
-    MethodType mt = MethodType.methodType(void.class, String.class);
-    MethodHandle mh = lookup.findStatic(BenchMH.class, "callme", mt);
- 
     Class[] argTypes = new Class[] { String.class };
     Method m = BenchMH.class.getDeclaredMethod("callme", argTypes);
-
-    // Run the loop twice to discount start-up overhead
+ 
+    // The second loop (hopefully) excludes warm up time.
     for (int x=0; x<2; x++) {
       {
-        long start = System.currentTimeMillis();
-        loopMH(loops, mh);
-        long end = System.currentTimeMillis();
-        System.out.println("MH:    loops = " + loops + ": elapsed = " +
-                           (end - start) + " ms");
+      long start = System.currentTimeMillis();
+      loopMH(loops);
+      long end = System.currentTimeMillis();
+      System.out.println("MH:    loops = " + loops + ": elapsed = "
+        + (end - start) + " ms");
       }
       {
-        long start = System.currentTimeMillis();
-        loopReflect(loops/100, m);
-        long end = System.currentTimeMillis();
-        System.out.println("Reflect: loops = " + (loops/100) + ": elapsed = " +
-                           (end - start) + " ms");
+      long start = System.currentTimeMillis();
+      loopReflect(loops);
+      long end = System.currentTimeMillis();
+      System.out.println("Reflect: loops = " + (loops) + ": elapsed = "
+        + (end - start) + " ms");
       }
       {
-        long start = System.currentTimeMillis();
-        loopDirect(loops);
-        long end = System.currentTimeMillis();
-        System.out.println("direct:  loops = " + loops + ": elapsed = " +
-                           (end - start) + " ms");
+      long start = System.currentTimeMillis();
+      loopDirect(loops);
+      long end = System.currentTimeMillis();
+      System.out.println("direct:  loops = " + loops + ": elapsed = "
+        + (end - start) + " ms");
       }
     }
   }
  
-  private static void loopMH(int loops, MethodHandle mh) throws Throwable {
+  private static void loopMH(int loops) throws Throwable {
     for (int i=0; i<loops; i++) {
       mh.invokeExact("yo!");
     }
   }
  
-  private static void loopReflect(int loops, Method method) throws Throwable {
+  private static void loopReflect(int loops) throws Throwable {
     for (int i=0; i<loops; i++) {
-      method.invoke(null, "yo!");
+      m.invoke(null, "yo!");
     }
   }
  
@@ -411,25 +431,22 @@ public class BenchMH {
     c = x;
   }
 }
- 
-$ java -XX:-Inline BenchMH 100000000
-
-           LOOPS     ELAPSED   NORMALIZED
-MH:      100000000   2333 ms     2333 ms
-Reflect:   1000000   1023 ms   102300 ms  ... 43x slower than MH
-direct:  100000000    972 ms      972 ms
 
 $ java BenchMH 100000000
 
-           LOOPS     ELAPSED   NORMALIZED
-MH:      100000000   1073 ms     1073 ms
-Reflect:   1000000    112 ms    11200 ms  ... 10x slower than MH
-direct:  100000000    746 ms      746 ms
+           LOOPS     ELAPSED 
+MH:      400000000   443 ms
+Reflect: 400000000  1054 ms  ... 2.3x slower than MH
+direct:  400000000   435 ms
 ```
 
-So you can see that, with inlining by the JIT compiler, `MethodHandle`
-is more than 10x faster than reflection, and can almost match the speed
-of a "real" method invocation (1073 ms vs 746 ms).
+Note that by using `static final MethodHandle mh`, we can get the JIT to inline the method handle
+invocation, so it's just as fast as a direct method invocation. But `static final` is not
+very convenient to use, and the JDK uses the [`@Stable`](http://hg.openjdk.java.net/jdk/jdk/file/9012aeaf993b/src/java.base/share/classes/jdk/internal/vm/annotation/Stable.java)
+annotation to achieve the same result. You can see an example
+[here](http://hg.openjdk.java.net/jdk/jdk/file/9012aeaf993b/src/java.base/share/classes/java/lang/invoke/CallSite.java#l226).
+However, `@Stable` can be used only by classes loaded by the bootstrap loader.
+
 
 # Linking Polymorphic Methods in the HotSpot JVM (static invocations)
 
