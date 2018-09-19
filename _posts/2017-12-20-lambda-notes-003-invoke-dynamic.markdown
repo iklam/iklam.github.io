@@ -21,26 +21,6 @@ post_url 2017-12-14-lambda-notes-001 %}).
 [a compilable HelloInvoker.jasm]({{ site.url }}/examples/HelloInvoker.jasm.txt)).
 
 ```
-// HelloInvoker.jasm
-super public class HelloInvoker
-    version 52:0
-{
-    public static Method doit:"()V"
-    stack 3 locals 1
-    {
-     ldc           String "yippee!";
-     invokedynamic InvokeDynamic REF_invokeStatic:\
-            HelloInvoke.myBSM:\
-                "(Ljava/lang/invoke/MethodHandles$Lookup;\
-                  Ljava/lang/String;\
-                  Ljava/lang/invoke/MethodType;\
-                 )Ljava/lang/invoke/CallSite;"\
-              :callme:\
-                 "(Ljava/lang/String;)V";
-     return;
-    }
-}
- 
 // HelloInvoke.java
 import java.lang.invoke.*;
  
@@ -58,6 +38,26 @@ public class HelloInvoke {
  
     static void callme(String x) {
         System.out.println("Hello invokedynamic: " + x);
+    }
+}
+
+// HelloInvoker.jasm
+super public class HelloInvoker
+    version 52:0
+{
+    public static Method doit:"()V"
+    stack 3 locals 1
+    {
+     ldc           String "yippee!";
+     invokedynamic InvokeDynamic REF_invokeStatic:\
+            HelloInvoke.myBSM:\
+                "(Ljava/lang/invoke/MethodHandles$Lookup;\
+                  Ljava/lang/String;\
+                  Ljava/lang/invoke/MethodType;\
+                 )Ljava/lang/invoke/CallSite;"\
+              :callme:\
+                 "(Ljava/lang/String;)V";
+     return;
     }
 }
  
@@ -105,9 +105,8 @@ It's possible to pass additional parameters to the bootstrap method, as we will 
 When the bootstrap method is called:
 
   * the `caller` parameter is provided by the JVM
-  * the `name` parameter is extracted from the constant pool entry. It indicates the method you want to invoke. (In our example, it's the name `callme`)
+  * the `name` parameter is extracted from the constant pool entry. It indicates the method you want to invoke. (In our example, it is `"callme"`)
   * the `type` parameter is also extracted from the constant pool entry. It indicates the parameter- and return types of the method that you want to invoke. In our case, it's `"(Ljava/lang/String;)V"`
-
 
 
 The bootstrap method must return an object of the
@@ -157,6 +156,7 @@ java.lang.Exception: Stack trace
              (MethodHandleNatives.java:240)
   at HelloInvoker.doit(HelloInvoker.jasm:1000002)
   at HelloInvoke.main(HelloInvoke.java:5)
+
 Hello invokedynamic: yippee!
 java.lang.Exception: Stack trace
   at HelloInvoke.callme(HelloInvoke.java:25)
@@ -164,8 +164,14 @@ java.lang.Exception: Stack trace
   at java.lang.invoke.LambdaForm$MH001.linkToTargetMethod000_LL_V()
   at HelloInvoker.doit(HelloInvoker.jasm:1000002)
   at HelloInvoke.main(HelloInvoke.java:5)
+
 Hello invokedynamic: yippee!
 java.lang.Exception: Stack trace
+  at HelloInvoke.callme(HelloInvoke.java:25)
+  at java.lang.invoke.DirectMethodHandle$Holder.invokeStatic()
+  at java.lang.invoke.LambdaForm$MH001.linkToTargetMethod000_LL_V()
+  at HelloInvoker.doit(HelloInvoker.jasm:1000002)
+  at HelloInvoke.main(HelloInvoke.java:6)
   ...
 ```
 
@@ -207,10 +213,25 @@ and the C callstack looks like this. This happens when the `invokedynamic` bytec
 #6 ?? ()
 </pre>
 
-The `JavaCalls::call_static(...)` in the C code makes a call to the Java method [`MethodHandleNatives.linkCallSite`](http://hg.openjdk.java.net/jdk/hs/file/ea0d0781c63c/src/java.base/share/classes/java/lang/invoke/MethodHandleNatives.java#l230), which calls [`MethodHandleNatives.linkCallSiteImpl`](http://hg.openjdk.java.net/jdk/hs/file/ea0d0781c63c/src/java.base/share/classes/java/lang/invoke/MethodHandleNatives.java#l245),
+The the C code makes a call to the Java method [`MethodHandleNatives.linkCallSite`](http://hg.openjdk.java.net/jdk/hs/file/ea0d0781c63c/src/java.base/share/classes/java/lang/invoke/MethodHandleNatives.java#l230). This method looks like this
+
+```
+class MethodHandleNatives {
+    static MemberName linkCallSite(Object callerObj,
+                                   Object bootstrapMethodObj,
+                                   Object nameObj, Object typeObj,
+                                   Object staticArguments,
+                                   Object[] appendixResult) {...}
+```
+`linkCallSite` returns information in two ways:
+
+* It returns an object of the `MemberName` type. This object points to a method that should be executed every time this `invokedynamic` instruction is executed.
+* Addition information are returned inside the `appendixResult` array, which are passed as parameters to the `MembedName`.
+
+Note that `MethodHandleNatives.linkCallSite` calls [`MethodHandleNatives.linkCallSiteImpl`](http://hg.openjdk.java.net/jdk/hs/file/ea0d0781c63c/src/java.base/share/classes/java/lang/invoke/MethodHandleNatives.java#l245),
 which eventually calls
 [`CallSite.makeSite`](http://hg.openjdk.java.net/jdk/hs/file/ea0d0781c63c/src/java.base/share/classes/java/lang/invoke/CallSite.java#l311)
-that tries to call `myBSM` using a MethodHandle,
+that calls `myBSM` using a MethodHandle,
 
 
 <pre>
@@ -284,8 +305,8 @@ In our example, the following is printed for `adapter->print()` (simplified):
 
 ```
 - this oop:          0x00007fff310f65e8
-- method holder:     'java/lang/invoke/LambdaForm$MH'
-- name:              'linkToTargetMethod'
+- method holder:     'java/lang/invoke/LambdaForm$MH001'
+- name:              'linkToTargetMethod000_LL_V'
 - signature:         '(Ljava/lang/Object;Ljava/lang/Object;)V'
  ...
 ```
@@ -328,12 +349,27 @@ When an `invokedynamic` bytecode is executed in the interpreter, it does the fol
 * If `appendix` is not null, push it to the stack as a trailing parameter
 * Call the `adapter` method
 
-In our example, our adapter `LambdaForm$MH.linkToTargetMethod` takes in 2 object parameters:
+In our example, our adapter `LambdaForm$MH001.linkToTargetMethod000_LL_V` takes in 2 object parameters:
 
 * The first parameter `p1` is the String `"yippee!"`
   * This was pushed by our test program in `HelloInvoker.doit`
 * The second parameter `p2` is a `DirectMethodHandle` that points to `HelloInvoke.callme`
   * This was pushed by `invokedynamic` as a trailing parameter
+
+```
+static Method linkToTargetMethod000_LL_V:
+    "(Ljava/lang/Object;Ljava/lang/Object;)V"
+  stack 2 locals 2
+{
+  aload_1;
+  checkcast	class MethodHandle;
+  aload_0;
+  invokevirtual	Method MethodHandle.invokeBasic:
+                      "(Ljava/lang/Object;)V";
+  return;
+}
+```
+
 
 It essentially does the following:
 
