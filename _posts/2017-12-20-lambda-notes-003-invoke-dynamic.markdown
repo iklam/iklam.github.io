@@ -106,7 +106,7 @@ When the bootstrap method is called:
 
   * the `caller` parameter is provided by the JVM
   * the `name` parameter is extracted from the constant pool entry. It indicates the method you want to invoke. (In our example, it is `"callme"`)
-  * the `type` parameter is also extracted from the constant pool entry. It indicates the parameter- and return types of the method that you want to invoke. In our case, it's `"(Ljava/lang/String;)V"`
+  * the `type` parameter is also extracted from the constant pool entry. It indicates the parameter- and return types of the method that you want to invoke. In our case, it is `"(Ljava/lang/String;)V"`
 
 
 The bootstrap method must return an object of the
@@ -143,7 +143,8 @@ public class HelloInvoke {
 }
 
 $ java -Djava.lang.invoke.MethodHandle.DUMP_CLASS_FILES=true \
-       -XX:+UnlockDiagnosticVMOptions -XX:+ShowHiddenFrames -cp . HelloInvoke
+       -XX:+UnlockDiagnosticVMOptions -XX:+ShowHiddenFrames \
+       -cp . HelloInvoke
 java.lang.Exception: Stack trace
   at HelloInvoke.myBSM(HelloInvoke.java:12)
   at java.lang.invoke.DirectMethodHandle$Holder.invokeStatic()
@@ -225,8 +226,10 @@ class MethodHandleNatives {
 ```
 `linkCallSite` returns information in two ways:
 
-* It returns an object of the `MemberName` type. This object points to a method that should be executed every time this `invokedynamic` instruction is executed.
-* Addition information are returned inside the `appendixResult` array, which are passed as parameters to the `MembedName`.
+* It returns an object of the `MemberName` type.
+* Addition information are returned inside the `appendixResult` array.
+
+*(We will discuss the returned information a bit later.)*
 
 Note that `MethodHandleNatives.linkCallSite` calls [`MethodHandleNatives.linkCallSiteImpl`](http://hg.openjdk.java.net/jdk/hs/file/ea0d0781c63c/src/java.base/share/classes/java/lang/invoke/MethodHandleNatives.java#l245),
 which eventually calls
@@ -267,7 +270,7 @@ This method returns two pieces of information back to the C code:
     * The `CallSite` points to the `HelloInvoke.callme method`.
   * a [`MemberName`](http://hg.openjdk.java.net/jdk/hs/file/ea0d0781c63c/src/java.base/share/classes/java/lang/invoke/MemberName.java). In our example, this is returned by <a
 href="http://hg.openjdk.java.net/jdk/hs/file/ea0d0781c63c/src/java.base/share/classes/java/lang/invoke/Invokers.java#l520">Invokers.linkToTargetMethod</a>
-which generates a LambdaForm according to the type of the method we're trying to invoke:
+which generates a LambdaForm (based solely on the `type` of the method we're trying to invoke):
 
 ```
 static MemberName linkToTargetMethod(MethodType mtype) {
@@ -323,6 +326,23 @@ To see the code of the adapter method, we can do this inside gdb:
 8 return
 ```
 
+Alternatively, we can find the generated class from `DUMP_CLASS_FILES/java/lang/invoke/LambdaForm$MH001.class`, and it can be disassembled:
+
+
+```
+static Method linkToTargetMethod000_LL_V:
+    "(Ljava/lang/Object;Ljava/lang/Object;)V"
+  stack 2 locals 2
+{
+  aload_1;
+  checkcast	class MethodHandle;
+  aload_0;
+  invokevirtual	Method MethodHandle.invokeBasic:
+                      "(Ljava/lang/Object;)V";
+  return;
+}
+```
+
 The following is printed by `appendix()->print()` (simplified):
 
 ```
@@ -355,20 +375,6 @@ In our example, our adapter `LambdaForm$MH001.linkToTargetMethod000_LL_V` takes 
   * This was pushed by our test program in `HelloInvoker.doit`
 * The second parameter `p2` is a `DirectMethodHandle` that points to `HelloInvoke.callme`
   * This was pushed by `invokedynamic` as a trailing parameter
-
-```
-static Method linkToTargetMethod000_LL_V:
-    "(Ljava/lang/Object;Ljava/lang/Object;)V"
-  stack 2 locals 2
-{
-  aload_1;
-  checkcast	class MethodHandle;
-  aload_0;
-  invokevirtual	Method MethodHandle.invokeBasic:
-                      "(Ljava/lang/Object;)V";
-  return;
-}
-```
 
 
 It essentially does the following:
