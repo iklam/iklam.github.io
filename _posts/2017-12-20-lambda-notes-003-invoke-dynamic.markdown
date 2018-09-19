@@ -226,7 +226,7 @@ class MethodHandleNatives {
 ```
 `linkCallSite` returns information in two ways:
 
-* It returns an object of the `MemberName` type.
+* It returns an `adapter` object of the `MemberName` type.
 * Addition information are returned inside the `appendixResult` array.
 
 *(We will discuss the returned information a bit later.)*
@@ -267,8 +267,8 @@ if (callSite instanceof ConstantCallSite) {
 This method returns two pieces of information back to the C code:
 
   * an `appendix` in `appendixResult[0]`, which contains the information of the resolved `CallSite` returned by `myBSM`.
-    * The `CallSite` points to the `HelloInvoke.callme method`.
-  * a [`MemberName`](http://hg.openjdk.java.net/jdk/hs/file/ea0d0781c63c/src/java.base/share/classes/java/lang/invoke/MemberName.java). In our example, this is returned by <a
+    * our `CallSite` points to the `HelloInvoke.callme method`.
+  * an `adapter` of the type [`MemberName`](http://hg.openjdk.java.net/jdk/hs/file/ea0d0781c63c/src/java.base/share/classes/java/lang/invoke/MemberName.java). In our example, this is returned by <a
 href="http://hg.openjdk.java.net/jdk/hs/file/ea0d0781c63c/src/java.base/share/classes/java/lang/invoke/Invokers.java#l520">Invokers.linkToTargetMethod</a>
 which generates a LambdaForm (based solely on the `type` of the method we're trying to invoke):
 
@@ -282,7 +282,7 @@ static MemberName linkToTargetMethod(MethodType mtype) {
 # Resolving CONSTANT_Dynamic in the ConstantPool
 
 To resolve the `CONSTANT_Dynamic` constant pool entry related to an
-`invokedynamic` bytecode, we store the `appendix` and `MemberName`
+`invokedynamic` bytecode, we store the `adapter` and `appendix`
 into the ConstantPoolCache of this entry.
 
 This resolution process is rather complicated, but the end result is pretty easy to see.
@@ -364,7 +364,7 @@ In summary, we store the following in a resolved constant pool entry for `invoke
 
 When an `invokedynamic` bytecode is executed in the interpreter, it does the following:
 
-* Make sure the the constant pool entry is resolved (see above)
+* Resolve the constant pool entry if necessary (see above)
 * Fetch the `adapter` and `appendix`  from the ConstantPoolCacheEntry
 * If `appendix` is not null, push it to the stack as a trailing parameter
 * Call the `adapter` method
@@ -372,7 +372,7 @@ When an `invokedynamic` bytecode is executed in the interpreter, it does the fol
 In our example, our adapter `LambdaForm$MH001.linkToTargetMethod000_LL_V` takes in 2 object parameters:
 
 * The first parameter `p1` is the String `"yippee!"`
-  * This was pushed by our test program in `HelloInvoker.doit`
+  * This was pushed by our test program in `HelloInvoker.doit` with the `ldc` bytecode
 * The second parameter `p2` is a `DirectMethodHandle` that points to `HelloInvoke.callme`
   * This was pushed by `invokedynamic` as a trailing parameter
 
